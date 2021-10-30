@@ -16,13 +16,9 @@
 #include <SDL2/SDL.h>
 #define GL_GLEXT_PROTOTYPES 1
 
-#ifdef OSX_BUILD
 #include <SDL2/SDL_opengles2.h>
-#else
-#include <SDL2/SDL_opengles2.h>
-#endif
-
 #include <SDL2/SDL_syswm.h>
+#include <SDL2/SDL_video.h>
 
 #endif // End of OS-Specific GL defines
 
@@ -32,14 +28,14 @@
 
 #include "gfx_window_manager_api.h"
 #include "gfx_screen_config.h"
+#include "gfx_uikit.h"
 #include "../pc_main.h"
 #include "../configfile.h"
 #include "../cliopts.h"
 
+#include "src/pc/controller/controller_api.h"
 #include "src/pc/controller/controller_keyboard.h"
 #include "src/pc/controller/controller_touchscreen.h"
-
-#import <UIKit/UIKit.h>
 
 // TODO: figure out if this shit even works
 #ifdef VERSION_EU
@@ -119,27 +115,24 @@ const SDL_Scancode scancode_rmapping_nonextended[][2] = {
 
 #define IS_FULLSCREEN() ((SDL_GetWindowFlags(wnd) & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
 
+// Bad don't do this
 @interface SDL_uikitviewcontroller : UIViewController
--   (BOOL)prefersHomeIndicatorAutoHidden;
 -   (UIRectEdge)preferredScreenEdgesDeferringSystemGestures;
 @end
 
 @implementation SDL_uikitviewcontroller (SDL_uikitviewcontroller_Extensions)
--   (BOOL)prefersHomeIndicatorAutoHidden {
-    return TRUE;
-}
 -   (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {
     return UIRectEdgeBottom;
 }
 @end
 
-long* get_sdl_viewcontroller() {
+UIViewController *get_sdl_viewcontroller() {
     SDL_SysWMinfo systemWindowInfo;
     SDL_VERSION(&systemWindowInfo.version);
     SDL_GetWindowWMInfo(wnd, &systemWindowInfo);
     
     UIWindow *uiWindow = systemWindowInfo.info.uikit.window;
-    return (int*)uiWindow.rootViewController;
+    return uiWindow.rootViewController;
 }
 
 static inline void sys_sleep(const uint64_t us) {
@@ -156,10 +149,10 @@ static int test_vsync(void) {
     // This method will fail if the refresh rate is changed, which, in
     // combination with that we can't control the queue size (i.e. lag)
     // is a reason this generic SDL2 backend should only be used as last resort.
-
+    
     for (int i = 0; i < 8; ++i)
         SDL_GL_SwapWindow(wnd);
-
+    
     Uint32 start = SDL_GetTicks();
     SDL_GL_SwapWindow(wnd);
     SDL_GL_SwapWindow(wnd);
@@ -255,7 +248,7 @@ static void gfx_sdl_init(const char *window_title) {
     wnd = SDL_CreateWindow(
         window_title,
         xpos, ypos, configWindow.w, configWindow.h,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
+        SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE | SDL_WINDOW_INPUT_FOCUS
     );
     
     ctx = SDL_GL_CreateContext(wnd);
@@ -266,6 +259,8 @@ static void gfx_sdl_init(const char *window_title) {
     gfx_sdl_set_vsync(configWindow.vsync);
 
     gfx_sdl_set_fullscreen();
+    
+    SDL_RaiseWindow(wnd);
 
     perf_freq = SDL_GetPerformanceFrequency();
     frame_time = perf_freq / FRAMERATE;
@@ -385,7 +380,29 @@ static void gfx_sdl_handle_events(void) {
                             SDL_GL_GetDrawableSize(wnd, &configWindow.w, &configWindow.h);
                             SDL_SetWindowSize(wnd, configWindow.w, configWindow.h);
                             break;
+                        case SDL_WINDOWEVENT_SHOWN:
+                            SDL_GL_GetDrawableSize(wnd, &configWindow.w, &configWindow.h);
+                            SDL_SetWindowSize(wnd, configWindow.w, configWindow.h);
+                            break;
+                        case SDL_WINDOWEVENT_RESIZED:
+                            printf("Window resized!\n");
+                            SDL_GL_GetDrawableSize(wnd, &configWindow.w, &configWindow.h);
+                            SDL_SetWindowSize(wnd, configWindow.w, configWindow.h);
+                            //SDL_SetWindowFullscreen(wnd, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                            break;
                     }
+                }
+                break;
+            case SDL_DISPLAYEVENT:
+                switch(event.display.event) {
+                    case SDL_DISPLAYEVENT_CONNECTED:
+                        if([[UIScreen screens] count] > 1) {
+                            setup_external_screen();
+                        }
+                        break;
+                    case SDL_DISPLAYEVENT_DISCONNECTED:
+                        teardown_external_screen();
+                        break;
                 }
                 break;
             case SDL_QUIT:

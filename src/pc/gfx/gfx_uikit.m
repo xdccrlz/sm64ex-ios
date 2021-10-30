@@ -6,12 +6,12 @@
 //
 
 #include <math.h>
-#import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import "gfx_uikit.h"
 
-#include "gfx_uikit.h"
-
-OverlayView *overlayView;
+UIViewController *gameViewController;
+UIWindow *externalWindow;
+UIWindow *mainWindow;
 
 @implementation OverlayView
 
@@ -27,73 +27,58 @@ OverlayView *overlayView;
     CGContextClearRect(context, rect);
 }
 
--   (BOOL)prefersHomeIndicatorAutoHidden {
-    return TRUE;
-}
-
 -   (UIRectEdge)preferredScreenEdgesDeferringSystemGestures {
     return UIRectEdgeBottom;
 }
 
 @end
 
-@implementation OverlayImageView
-
--   (CGImageRef) imageRef {
-    return imageRef;
-}
-
--   (void)setImageRef:(CGImageRef)newImageRef {
-    if(imageRef != newImageRef) {
-        imageRef = newImageRef;
-        [self setNeedsDisplay];
+void gfx_uikit_init(UIViewController *viewControllerPointer) {
+    gameViewController = viewControllerPointer;
+    
+    mainWindow = [[[UIApplication sharedApplication] delegate] window];
+    
+    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:@"Main" bundle:nil];
+    tcvc = [storyboard instantiateViewControllerWithIdentifier:@"TouchControlsViewController"];
+    
+    if([[UIScreen screens] count] > 1) {
+        setup_external_screen();
+    } else {
+        [gameViewController.view addSubview:tcvc.view];
     }
 }
 
--   (id)initWithFrame:(CGRect)frame {
-    if(self = [super initWithFrame:frame]) {
-        [self setBackgroundColor:[UIColor clearColor]];
+void setup_external_screen() {
+    [tcvc.view removeFromSuperview];
+    mainWindow.rootViewController = tcvc;
+    
+    UIStoryboard *storyboard = [UIStoryboard storyboardWithName:@"Main" bundle:nil];
+    ExternalGameViewController *externalVc = [storyboard instantiateViewControllerWithIdentifier:@"ExternalScreen"];
+    UIScreen *screen = [UIScreen screens][1];
+    externalWindow = [[objc_getClass("SDL_uikitwindow") alloc] initWithFrame:screen.bounds];
+    externalWindow.rootViewController = nil;
+    externalWindow.rootViewController = externalVc;
+    externalWindow.screen = screen;
+    externalWindow.screen.overscanCompensation = UIScreenOverscanCompensationScale;
+    externalWindow.hidden = NO;
+    [externalVc.view addSubview:gameViewController.view];
+    gameViewController.view.frame = externalVc.view.bounds;
+    gameViewController.view.contentScaleFactor = 1.0;
+}
+
+void teardown_external_screen() {
+    if(externalWindow != nil) {
+        [tcvc.view removeFromSuperview];
+        mainWindow.rootViewController = gameViewController;
+        [gameViewController.view addSubview:tcvc.view];
+        UIScreen *screen = [UIScreen screens][0];
+        gameViewController.view.frame = screen.bounds;
+        gameViewController.view.contentScaleFactor = screen.scale;
+        externalWindow.hidden = YES;
+        externalWindow = nil;
     }
-    return self;
 }
 
--   (void)drawRect:(CGRect)rect {
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    CGContextSetAlpha(context, 0.7);
-    CGContextDrawImage(context, rect, self.imageRef);
-}
-
--   (void)setRotation:(CGFloat)angle {
-    CGFloat radians = angle / 180.0 * M_PI;
-    CGAffineTransform rotation = CGAffineTransformRotate(self.transform, radians);
-    self.transform = rotation;
-}
-
-@end
-
-CGImageRef create_imageref(const char *path) {
-    NSString *nsPath = [NSString stringWithUTF8String:path];
-    CGDataProviderRef imageDataProvider = CGDataProviderCreateWithCFData((CFDataRef)[NSData dataWithContentsOfFile:nsPath]);
-    CGImageRef imageRef = CGImageCreateWithPNGDataProvider(imageDataProvider, NULL, true, kCGRenderingIntentDefault);
-    return imageRef;
-}
-
-OverlayImageView *add_image_subview(CGImageRef imageRef, CGRect rect) {
-    OverlayImageView *v = [[OverlayImageView alloc] initWithFrame:rect];
-    [v setImageRef:imageRef];
-    v.contentMode = UIViewContentModeRedraw;
-    [overlayView addSubview:v];
-    return v;
-}
-
-void gfx_uikit_init(long *viewControllerPointer) {
-    // There's probably a better way to do this than pointer casting
-    UIViewController *viewController = (UIViewController *)viewControllerPointer;
-    
-    CGRect mainScreenBounds = [[UIScreen mainScreen] bounds];
-    overlayView = [[OverlayView alloc] initWithFrame:mainScreenBounds];
-    
-    
-    
-    [viewController.view addSubview:overlayView];
+void gfx_uikit_set_touchscreen_callbacks(void (*down)(void* event), void (*motion)(void* event), void (*up)(void* event)) {
+    [tcvc set_touchscreen_callbacks:down motion:motion up:up];
 }
